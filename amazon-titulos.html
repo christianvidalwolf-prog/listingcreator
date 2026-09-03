@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Generador de Títulos Amazon</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .fade-in { animation: fadeIn .3s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid #c7d2fe;
+      border-top-color: #6366f1;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .drop-zone { border: 2px dashed #e2e8f0; border-radius: 12px; transition: all .2s; }
+    .drop-zone:hover { border-color: #6366f1; background: #f8fafc; }
+  </style>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+  <div class="max-w-5xl mx-auto px-4 py-10">
+
+    <!-- Header -->
+    <div class="mb-8">
+      <h1 class="text-3xl font-bold text-gray-900 tracking-tight">Generador de títulos Amazon</h1>
+      <p class="text-gray-500 mt-1 text-sm">Analiza imágenes de producto y genera títulos optimizados para Amazon España.</p>
+    </div>
+
+    <!-- Panel configuración -->
+    <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-5 mb-4 space-y-4">
+
+      <!-- Selector de proveedor -->
+      <div>
+        <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Proveedor de IA</label>
+        <div class="flex gap-2 flex-wrap">
+          <button onclick="setProvider('anthropic')" id="btn-anthropic"
+            class="provider-btn px-4 py-1.5 rounded-lg border text-sm font-medium transition-colors">
+            🟣 Anthropic Claude
+          </button>
+          <button onclick="setProvider('openai')" id="btn-openai"
+            class="provider-btn px-4 py-1.5 rounded-lg border text-sm font-medium transition-colors">
+            🟢 OpenAI GPT-4o
+          </button>
+          <button onclick="setProvider('gemini')" id="btn-gemini"
+            class="provider-btn px-4 py-1.5 rounded-lg border text-sm font-medium transition-colors">
+            🔵 Google Gemini <span class="text-xs text-emerald-600 font-semibold">gratis</span>
+          </button>
+          <button onclick="setProvider('qwen')" id="btn-qwen"
+            class="provider-btn px-4 py-1.5 rounded-lg border text-sm font-medium transition-colors">
+            🔴 Alibaba Qwen
+          </button>
+          <button onclick="setProvider('groq')" id="btn-groq"
+            class="provider-btn px-4 py-1.5 rounded-lg border text-sm font-medium transition-colors">
+            🟠 Groq Llama 3.2
+          </button>
+          <button onclick="setProvider('kimi')" id="btn-kimi"
+            class="provider-btn px-4 py-1.5 rounded-lg border text-sm font-medium transition-colors">
+            🌙 Moonshot Kimi
+          </button>
+          <button onclick="setProvider('deepseek')" id="btn-deepseek"
+            class="provider-btn px-4 py-1.5 rounded-lg border text-sm font-medium transition-colors">
+            🧪 DeepSeek Visión
+          </button>
+          <button onclick="setProvider('huggingface')" id="btn-huggingface"
+            class="provider-btn px-4 py-1.5 rounded-lg border text-sm font-medium transition-colors">
+            🤗 Hugging Face
+          </button>
+        </div>
+      </div>
+
+      <!-- API Key -->
+      <div>
+        <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
+          API Key — <span id="keyLabel" class="normal-case font-normal text-gray-400"></span>
+        </label>
+        <input
+          type="password"
+          id="apiKey"
+          placeholder=""
+          oninput="saveKey(this.value)"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+        >
+        <p id="keyHint" class="text-xs text-gray-400 mt-1"></p>
+      </div>
+
+      <!-- Modelo Gemini (solo visible con Gemini) -->
+      <div id="geminiModelWrap" class="hidden">
+        <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
+          Modelo Gemini <span class="normal-case font-normal text-gray-400">— cámbialo si hay error de cuota</span>
+        </label>
+        <input
+          type="text"
+          id="geminiModel"
+          value="gemini-2.5-flash"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+        >
+        <p class="text-xs text-gray-400 mt-1">
+          <code class="bg-gray-100 px-1 rounded">gemini-3.1-flash-lite-preview</code> →
+          <code class="bg-gray-100 px-1 rounded">gemini-2.5-flash</code> →
+          <code class="bg-gray-100 px-1 rounded">gemini-3-flash-preview</code>
+        </p>
+      </div>
+    </div>
+
+    <!-- Panel Carga de Datos -->
+    <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-5 mb-4 grid grid-cols-1 md:grid-cols-2 gap-5">
+      <div>
+        <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
+          Cargar Excel o CSV <span class="normal-case font-normal text-gray-400">(URL, Nombre, Medidas)</span>
+        </label>
+        <div class="drop-zone p-6 text-center cursor-pointer" onclick="$('fileInput').click()">
+          <p class="text-sm text-gray-500">Haz clic para subir un archivo Excel o arrústralo aquí</p>
+          <input type="file" id="fileInput" class="hidden" accept=".csv,.xlsx,.xls" onchange="handleFile(this)">
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
+          O pega URLs <span class="normal-case font-normal text-gray-400">(una por línea)</span>
+        </label>
+        <textarea
+          id="urlsInput"
+          rows="3"
+          placeholder="https://images.example.com/producto1.jpg&#10;…"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition resize-y"
+        ></textarea>
+      </div>
+    </div>
+
+    <!-- Acciones -->
+    <div class="flex flex-wrap items-center gap-3 mb-6">
+      <button id="processBtn" onclick="processImages()"
+        class="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold px-6 py-2 rounded-lg transition-colors shadow-sm">
+        Procesar imágenes
+      </button>
+      <button id="exportBtn" onclick="exportCSV()"
+        class="hidden bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold px-6 py-2 rounded-lg transition-colors shadow-sm">
+        ↓ Guardar en Descargas
+      </button>
+      <span id="progressLabel" class="text-sm text-gray-500"></span>
+    </div>
+
+    <!-- Progress bar -->
+    <div id="progressBarWrap" class="hidden w-full bg-gray-200 rounded-full h-1.5 mb-5 overflow-hidden">
+      <div id="progressBar" class="bg-indigo-500 h-1.5 rounded-full transition-all duration-300" style="width:0%"></div>
+    </div>
+
+    <!-- Tabla resultados -->
+    <div id="resultsContainer" class="hidden bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="bg-gray-50 border-b border-gray-200 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            <th class="px-4 py-3 text-left w-16">Img</th>
+            <th class="px-4 py-3 text-left w-24">Ref</th>
+            <th class="px-4 py-3 text-left">Contexto</th>
+            <th class="px-4 py-3 text-left">Título generado</th>
+          </tr>
+        </thead>
+        <tbody id="resultsBody" class="divide-y divide-gray-100"></tbody>
+      </table>
+    </div>
+
+  </div>
+
+  <script>
+    let results = [];
+    let currentProvider = 'anthropic';
+
+    const PROVIDERS = {
+      anthropic: {
+        label: 'Anthropic (console.anthropic.com)',
+        placeholder: 'sk-ant-api03-…',
+        hint: 'Requiere créditos de pago en console.anthropic.com',
+        storageKey: 'apikey_anthropic',
+      },
+      openai: {
+        label: 'OpenAI (platform.openai.com)',
+        placeholder: 'sk-proj-…',
+        hint: 'Requiere créditos en platform.openai.com',
+        storageKey: 'apikey_openai',
+      },
+      gemini: {
+        label: 'Google AI Studio (aistudio.google.com/app/apikey)',
+        placeholder: 'AIza…',
+        hint: 'Capa gratuita disponible — obtén tu key gratis en aistudio.google.com',
+        storageKey: 'apikey_gemini',
+      },
+      qwen: {
+        label: 'Alibaba DashScope (dashscope.console.aliyun.com)',
+        placeholder: 'sk-…',
+        hint: 'Modelo Qwen-3-VL. Requiere créditos en DashScope.',
+        storageKey: 'apikey_qwen',
+      },
+      groq: {
+        label: 'Groq Cloud (console.groq.com)',
+        placeholder: 'gsk_…',
+        hint: 'Modelo Llama-3.2 Vision. ¡Súper rápido y gratuito!',
+        storageKey: 'apikey_groq',
+      },
+      kimi: {
+        label: 'Moonshot AI Kimi (platform.moonshot.cn)',
+        placeholder: 'sk-…',
+        hint: 'Modelo Kimi-Vision. Requiere créditos o prueba gratuita.',
+        storageKey: 'apikey_kimi',
+      },
+      deepseek: {
+        label: 'DeepSeek Platform (platform.deepseek.com)',
+        placeholder: 'sk-…',
+        hint: 'Capa gratuita generosa al registrarse. Súper SEO.',
+        storageKey: 'apikey_deepseek',
+      },
+      huggingface: {
+        label: 'Hugging Face (huggingface.co/settings/tokens)',
+        placeholder: 'hf_…',
+        hint: 'Modelos Open Source (Llava/Qwen) gratuitos. Elige un modelo potente.',
+        storageKey: 'apikey_hf',
+      },
+    };
+
+    function $(id) { return document.getElementById(id); }
+
+    function escHtml(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function setProvider(p) {
+      currentProvider = p;
+      const cfg = PROVIDERS[p];
+
+      // Botones activos
+      ['anthropic','openai','gemini','qwen','groq','kimi','deepseek','huggingface'].forEach(k => {
+        const btn = $(`btn-${k}`);
+        if (k === p) {
+          btn.className = 'provider-btn px-4 py-1.5 rounded-lg border text-sm font-medium transition-colors bg-indigo-600 border-indigo-600 text-white';
+        } else {
+          btn.className = 'provider-btn px-4 py-1.5 rounded-lg border text-sm font-medium transition-colors bg-white border-gray-300 text-gray-700 hover:border-indigo-400';
+        }
+      });
+
+      $('keyLabel').textContent = cfg.label;
+      $('apiKey').placeholder = cfg.placeholder;
+      $('keyHint').textContent = cfg.hint;
+      $('apiKey').value = localStorage.getItem(cfg.storageKey) || '';
+      $('geminiModelWrap').classList.toggle('hidden', p !== 'gemini');
+    }
+
+    function saveKey(val) {
+      localStorage.setItem(PROVIDERS[currentProvider].storageKey, val);
+    }
+
+    function setProgress(done, total) {
+      const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+      $('progressBar').style.width = pct + '%';
+      $('progressLabel').textContent = done < total
+        ? `Procesando ${done} de ${total}…`
+        : `✓ ${total} imagen${total !== 1 ? 'es' : ''} procesada${total !== 1 ? 's' : ''}.`;
+    }
+
+    function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+    async function callAI(apiKey, imageUrl, name = '', dimensions = '') {
+      const resp = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: currentProvider,
+          api_key: apiKey,
+          image_url: imageUrl,
+          name: name,
+          dimensions: dimensions,
+          model: currentProvider === 'gemini' ? ($('geminiModel').value.trim() || 'gemini-2.5-flash') : ''
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      return data.title;
+    }
+
+    function handleFile(input) {
+      const file = input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+        
+        let urls = [];
+        rows.forEach(row => {
+          if (row[0] && row[0].toString().startsWith('http')) {
+            urls.push({
+              url: row[0].trim(),
+              name: row[1] ? row[1].toString().trim() : '',
+              dims: row[2] ? row[2].toString().trim() : ''
+            });
+          }
+        });
+        
+        if (urls.length > 0) {
+          window.pendingData = urls;
+          $('progressLabel').textContent = `✓ ${urls.length} filas cargadas desde el archivo.`;
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function getRef(url) {
+      const parts = url.split('/');
+      const last = parts[parts.length - 1];
+      return last.replace(/\.[^/.]+$/, ""); // Quita .jpg o cualquier extensión
+    }
+
+    function addRow(index, item) {
+      const tbody = $('resultsBody');
+      const tr = document.createElement('tr');
+      tr.id = `row-${index}`;
+      tr.className = 'fade-in hover:bg-gray-50 transition-colors';
+      const ph = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='50' height='50'%3E%3Crect width='50' height='50' fill='%23f3f4f6'/%3E%3Ctext x='50%25' y='55%25' dominant-baseline='middle' text-anchor='middle' fill='%239ca3af' font-size='9' font-family='sans-serif'%3EN/A%3C/text%3E%3C/svg%3E`;
+      tr.innerHTML = `
+        <td class="px-4 py-3">
+          <img src="${escHtml(item.url)}" width="50" height="50"
+            class="object-cover rounded-md border border-gray-200 bg-gray-100"
+            onerror="this.src='${ph}'">
+        </td>
+        <td class="px-4 py-3 text-xs font-mono text-gray-500">
+          ${escHtml(getRef(item.url))}
+        </td>
+        <td class="px-4 py-3 text-xs text-gray-400">
+          <div class="font-semibold text-gray-700">${escHtml(item.name || '-')}</div>
+          <div>${escHtml(item.dims || '-')}</div>
+        </td>
+        <td class="px-4 py-3 align-top" id="cell-${index}">
+          <span class="text-gray-400 text-xs"><span class="spinner"></span>Generando…</span>
+        </td>`;
+      tbody.appendChild(tr);
+    }
+
+    function setRowResult(index, title, isError) {
+      const cell = $(`cell-${index}`);
+      if (!cell) return;
+      if (isError) {
+        cell.innerHTML = `<span class="text-red-500 text-xs">${escHtml(title)}</span>`;
+      } else {
+        cell.innerHTML = `<span class="text-gray-800 font-medium leading-snug">${escHtml(title)}</span><span class="block text-gray-400 text-xs mt-0.5">${title.length} car.</span>`;
+      }
+    }
+
+    async function processImages() {
+      const apiKey = $('apiKey').value.trim();
+      if (!apiKey) { alert('Introduce tu API Key antes de continuar.'); return; }
+
+      let items = [];
+      if (window.pendingData && window.pendingData.length > 0) {
+        items = window.pendingData;
+      } else {
+        const urls = $('urlsInput').value.trim().split('\n').map(u => u.trim()).filter(Boolean);
+        items = urls.map(u => ({ url: u, name: '', dims: '' }));
+      }
+      
+      if (items.length === 0) { alert('Introduce al menos una URL o carga un Excel.'); return; }
+
+      results = [];
+      $('resultsBody').innerHTML = '';
+      $('resultsContainer').classList.remove('hidden');
+      $('exportBtn').classList.add('hidden');
+      $('progressBarWrap').classList.remove('hidden');
+      $('progressBar').style.width = '0%';
+      setProgress(0, items.length);
+
+      const btn = $('processBtn');
+      btn.disabled = true;
+      btn.textContent = 'Procesando…';
+      btn.classList.add('opacity-60', 'cursor-not-allowed');
+
+      items.forEach((item, i) => addRow(i, item));
+
+      for (let i = 0; i < items.length; i++) {
+        try {
+          if (['gemini', 'groq'].includes(currentProvider) && i > 0) {
+            const waitTime = currentProvider === 'gemini' ? 10000 : 5000;
+            await sleep(waitTime);
+          }
+          const title = await callAI(apiKey, items[i].url, items[i].name, items[i].dims);
+          setRowResult(i, title, false);
+          results.push({ url: items[i].url, titulo: title });
+        } catch (e) {
+          setRowResult(i, `Error: ${e.message}`, true);
+          results.push({ url: items[i].url, titulo: `Error: ${e.message}` });
+        }
+        setProgress(i + 1, items.length);
+      }
+
+      btn.disabled = false;
+      btn.textContent = 'Procesar imágenes';
+      btn.classList.remove('opacity-60', 'cursor-not-allowed');
+      $('exportBtn').classList.remove('hidden');
+      window.pendingData = null; // Clear
+    }
+
+    async function exportCSV() {
+      if (!results.length) return;
+      const rows = results.map(r => `"${getRef(r.url)}","${r.titulo.replace(/"/g,'""')}"`);
+      const csvContent = 'referencia,titulo\n' + rows.join('\n');
+      const filename = `titulos_amazon_${new Date().toISOString().slice(0,10)}.csv`;
+
+      try {
+        const resp = await fetch('/api/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: csvContent, filename: filename })
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          alert(`✅ ${data.message}`);
+        } else {
+          throw new Error(data.error);
+        }
+      } catch (e) {
+        alert(`❌ Error al guardar: ${e.message}`);
+      }
+    }
+
+    // Init
+    setProvider('gemini'); // default: gratis
+  </script>
+
+</body>
+</html>
