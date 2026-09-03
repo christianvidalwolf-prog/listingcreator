@@ -337,7 +337,8 @@ def call_openrouter(api_key, image_url, name="", dims=""):
     prompt = PROMPT_TEMPLATE.format(name=name, dims=dims)
     body = json.dumps({
         "model": "deepseek/deepseek-v4-flash-vision-exp",
-        "max_tokens": 500,
+        "max_tokens": 800,
+        "reasoning": {"effort": "none"},
         "messages": [{
             "role": "user",
             "content": [
@@ -367,7 +368,9 @@ def call_openrouter(api_key, image_url, name="", dims=""):
                 part.get("text", "") for part in content if isinstance(part, dict)
             )
         if not isinstance(content, str) or not content.strip():
-            reason = message.get("refusal") or data.get("error", {}).get("message")
+            reason = (message.get("refusal")
+                      or data.get("error", {}).get("message")
+                      or f"finalización: {data.get('choices', [{}])[0].get('finish_reason', 'desconocida')}")
             raise ValueError(reason or "OpenRouter no devolvió contenido de texto")
         return content.strip()
 
