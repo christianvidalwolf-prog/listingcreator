@@ -361,7 +361,7 @@ def call_openrouter(api_key, image_url, name="", dims=""):
     prompt = PROMPT_TEMPLATE.format(name=name, dims=dims)
     body = json.dumps({
         "model": "deepseek/deepseek-v4-flash-vision-exp",
-        "max_tokens": 350,
+        "max_tokens": 500,
         "messages": [{
             "role": "user",
             "content": [
@@ -384,7 +384,16 @@ def call_openrouter(api_key, image_url, name="", dims=""):
     )
     with urllib.request.urlopen(req, timeout=60) as resp:
         data = json.loads(resp.read())
-        return data["choices"][0]["message"]["content"].strip()
+        message = data.get("choices", [{}])[0].get("message", {})
+        content = message.get("content")
+        if isinstance(content, list):
+            content = "".join(
+                part.get("text", "") for part in content if isinstance(part, dict)
+            )
+        if not isinstance(content, str) or not content.strip():
+            reason = message.get("refusal") or data.get("error", {}).get("message")
+            raise ValueError(reason or "OpenRouter no devolvió contenido de texto")
+        return content.strip()
 
 
 def call_huggingface(api_key, image_url, name="", dims=""):
