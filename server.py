@@ -357,6 +357,36 @@ def call_deepseek(api_key, image_url, name="", dims=""):
         return data["choices"][0]["message"]["content"].strip()
 
 
+def call_openrouter(api_key, image_url, name="", dims=""):
+    prompt = PROMPT_TEMPLATE.format(name=name, dims=dims)
+    body = json.dumps({
+        "model": "deepseek/deepseek-v4-flash-vision-exp",
+        "max_tokens": 350,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": image_url}}
+            ]
+        }]
+    }).encode()
+    req = urllib.request.Request(
+        "https://openrouter.ai/api/v1/chat/completions",
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            "HTTP-Referer": "https://listingcreator.local",
+            "X-Title": "ListingCreator Amazon",
+            "User-Agent": "Mozilla/5.0"
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        data = json.loads(resp.read())
+        return data["choices"][0]["message"]["content"].strip()
+
+
 def call_huggingface(api_key, image_url, name="", dims=""):
     prompt = PROMPT_TEMPLATE.format(name=name, dims=dims)
     model_id = "Qwen/Qwen2-VL-7B-Instruct" 
@@ -391,6 +421,7 @@ PROVIDERS = {
     "groq": call_groq,
     "kimi": call_kimi,
     "deepseek": call_deepseek,
+    "openrouter": call_openrouter,
     "huggingface": call_huggingface,
 }
 
@@ -406,6 +437,7 @@ def get_api_key(provider, client_key):
         "qwen": ["QWEN_API_KEY", "DASHSCOPE_API_KEY"],
         "kimi": ["KIMI_API_KEY", "MOONSHOT_API_KEY"],
         "deepseek": ["DEEPSEEK_API_KEY"],
+        "openrouter": ["OPENROUTER_API_KEY"],
         "huggingface": ["HUGGINGFACE_API_KEY", "HF_TOKEN"],
     }
     for env_var in env_map.get(provider, []):

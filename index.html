@@ -103,6 +103,10 @@
             class="provider-btn px-3.5 py-1.5 rounded-lg border text-sm font-medium transition-colors">
             🧪 DeepSeek Visión
           </button>
+          <button onclick="setProvider('openrouter')" id="btn-openrouter"
+            class="provider-btn px-3.5 py-1.5 rounded-lg border text-sm font-medium transition-colors">
+            🧭 DeepSeek V4 (OpenRouter)
+          </button>
           <button onclick="setProvider('huggingface')" id="btn-huggingface"
             class="provider-btn px-3.5 py-1.5 rounded-lg border text-sm font-medium transition-colors">
             🤗 Hugging Face
@@ -288,6 +292,12 @@
         hint: 'Capa de créditos al registrarse.',
         storageKey: 'apikey_deepseek',
       },
+      openrouter: {
+        label: 'OpenRouter (openrouter.ai)',
+        placeholder: 'sk-or-v1-…',
+        hint: 'Usa DeepSeek V4 Flash Vision a través de OpenRouter.',
+        storageKey: 'apikey_openrouter',
+      },
       huggingface: {
         label: 'Hugging Face (huggingface.co/settings/tokens)',
         placeholder: 'hf_…',
@@ -310,7 +320,7 @@
       currentProvider = p;
       const cfg = PROVIDERS[p];
 
-      ['anthropic','openai','gemini','qwen','groq','kimi','deepseek','huggingface'].forEach(k => {
+      ['anthropic','openai','gemini','qwen','groq','kimi','deepseek','openrouter','huggingface'].forEach(k => {
         const btn = $(`btn-${k}`);
         if (!btn) return;
         if (k === p) {
