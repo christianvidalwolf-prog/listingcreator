@@ -32,7 +32,7 @@ def load_env():
 load_env()
 
 PROMPT_TEMPLATE = (
-    "ACTÚA COMO UN EXPERTO EN SEO DE AMAZON. GENERA EL TÍTULO Y LOS HIGHLIGHTS DE PRODUCTO "
+    "ACTÚA COMO UN EXPERTO EN SEO DE AMAZON. GENERA EL TÍTULO, 5 BULLET POINTS Y LA DESCRIPCIÓN "
     "SIGUIENDO ESTRICTAMENTE LA NUEVA NORMATIVA OFICIAL DE AMAZON 2026.\n\n"
     "DATOS DEL PRODUCTO:\n"
     "- Producto / Contexto: {name}\n"
@@ -42,10 +42,14 @@ PROMPT_TEMPLATE = (
     "   - Estructura: [Tipo de producto comercial] + [Material/Color principal] + [Variante clave o modelo].\n"
     "   - Prohibido: relleno de keywords, frases de marketing ('calidad garantizada', 'oferta'), emojis o símbolos (™, ®).\n"
     "2. HIGHLIGHTS (highlights): MÁXIMO 125 CARACTERES (espacios incluidos).\n"
-    "   - Formato: Frases cortas separadas exclusivamente por comas (sin punto y final largo).\n"
-    "   - Contenido: Materiales, acabados, medidas ({dims}) y uso principal.\n\n"
+    "   - Frases cortas separadas por comas, sin promesas ni símbolos especiales.\n"
+    "3. BULLET POINTS (bullet_points): EXACTAMENTE 5 puntos, cada uno entre 100 y 200 caracteres.\n"
+    "   - Cada punto empieza por una característica y explica su beneficio. Información única y verificable.\n"
+    "   - Sin precios, envíos, contacto, garantías, opiniones, mayúsculas integrales, emojis ni afirmaciones médicas.\n"
+    "4. DESCRIPCIÓN (description): 500-1000 caracteres, clara y natural, basada solo en los datos disponibles.\n"
+    "   - Sin HTML, precio, promociones, contacto, garantías absolutas ni información no confirmada.\n\n"
     "RESPONDE ÚNICAMENTE CON UN OBJETO JSON VÁLIDO CON ESTE FORMATO EXACTO (sin texto adicional ni markdown):\n"
-    '{{"title": "...", "highlights": "..."}}'
+    '{{"title": "...", "highlights": "...", "bullet_points": ["...", "...", "...", "...", "..."], "description": "..."}}'
 )
 
 
@@ -53,9 +57,11 @@ def parse_ai_response(raw_text):
     """Extrae y normaliza title y highlights asegurando cumplimiento de límites de Amazon 2026."""
     title = ""
     highlights = ""
+    bullet_points = []
+    description = ""
 
     if not raw_text or not isinstance(raw_text, str):
-        return {"title": "", "highlights": ""}
+        return {"title": "", "highlights": "", "bullet_points": [], "description": ""}
 
     text = raw_text.strip()
 
@@ -66,6 +72,11 @@ def parse_ai_response(raw_text):
             data = json.loads(json_match.group(0))
             title = str(data.get("title") or data.get("titulo") or "").strip()
             highlights = str(data.get("highlights") or data.get("puntos_destacados") or data.get("destacados") or "").strip()
+            bullet_points = data.get("bullet_points") or data.get("bullets") or data.get("puntos") or []
+            if isinstance(bullet_points, str):
+                bullet_points = [p.strip() for p in re.split(r"\n|\|", bullet_points) if p.strip()]
+            bullet_points = [str(p).strip() for p in bullet_points[:5]]
+            description = str(data.get("description") or data.get("descripcion") or "").strip()
         except Exception:
             pass
 
@@ -113,7 +124,9 @@ def parse_ai_response(raw_text):
 
     return {
         "title": title,
-        "highlights": highlights
+        "highlights": highlights,
+        "bullet_points": bullet_points,
+        "description": description
     }
 
 

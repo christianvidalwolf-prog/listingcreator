@@ -47,7 +47,7 @@
           </span>
         </div>
         <p class="text-gray-500 mt-1 text-sm">
-          Generador de listings para Amazon: Título comercial conciso (máx. 75 car.) + Item Highlights (máx. 125 car.).
+          Generador de listings para Amazon: título, Item Highlights, 5 bullet points y descripción.
         </p>
       </div>
 
@@ -235,6 +235,8 @@
                 Item Highlights
                 <span class="text-[10px] font-normal normal-case text-indigo-600 ml-1">(máx. 125 car. separadas por comas)</span>
               </th>
+              <th class="px-3 py-3 text-left w-1/3">5 Bullet Points</th>
+              <th class="px-3 py-3 text-left w-1/3">Descripción</th>
               <th class="px-3 py-3 text-center w-24">Copiar</th>
             </tr>
           </thead>
@@ -368,7 +370,9 @@
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
       return {
         title: data.title || '',
-        highlights: data.highlights || ''
+        highlights: data.highlights || '',
+        bullet_points: data.bullet_points || [],
+          description: data.description || ''
       };
     }
 
@@ -438,6 +442,12 @@
         <td class="px-3 py-3 align-top" id="cell-highlights-${index}">
           <span class="text-gray-400 text-xs"><span class="spinner"></span>Generando highlights…</span>
         </td>
+        <td class="px-3 py-3 align-top" id="cell-bullets-${index}">
+          <span class="text-gray-400 text-xs"><span class="spinner"></span>Generando bullets…</span>
+        </td>
+        <td class="px-3 py-3 align-top" id="cell-description-${index}">
+          <span class="text-gray-400 text-xs"><span class="spinner"></span>Generando descripción…</span>
+        </td>
         <td class="px-3 py-3 align-top text-center" id="cell-actions-${index}">
           <span class="text-gray-300 text-xs">-</span>
         </td>`;
@@ -487,10 +497,12 @@
       }
     }
 
-    function setRowSuccess(index, title, highlights) {
+    function setRowSuccess(index, title, highlights, bulletPoints = [], description = '') {
       const cellTitle = $(`cell-title-${index}`);
       const cellHigh = $(`cell-highlights-${index}`);
       const cellActions = $(`cell-actions-${index}`);
+      const cellBullets = $(`cell-bullets-${index}`);
+      const cellDescription = $(`cell-description-${index}`);
       if (!cellTitle || !cellHigh) return;
 
       const tLen = title.length;
@@ -530,6 +542,9 @@
           </div>
         </div>`;
 
+      if (cellBullets) cellBullets.innerHTML = `<ol class="list-decimal pl-5 space-y-1 text-xs text-gray-800">${bulletPoints.slice(0, 5).map((b, i) => `<li id="bullet-${index}-${i}" contenteditable="true" oninput="updateListingFields(${index})" class="editable-cell p-1 rounded hover:border-gray-200 border border-transparent">${escHtml(b)}</li>`).join('')}</ol>`;
+      if (cellDescription) cellDescription.innerHTML = `<div id="description-${index}" contenteditable="true" oninput="updateListingFields(${index})" class="editable-cell text-xs leading-snug p-2 rounded border border-transparent hover:border-gray-200">${escHtml(description)}</div>`;
+
       if (cellActions) {
         cellActions.innerHTML = `
           <button onclick="copyBoth(${index})" title="Copiar Título y Highlights"
@@ -544,6 +559,17 @@
       const cellHigh = $(`cell-highlights-${index}`);
       if (cellTitle) cellTitle.innerHTML = `<span class="text-red-500 text-xs font-medium">${escHtml(errorMsg)}</span>`;
       if (cellHigh) cellHigh.innerHTML = `<span class="text-gray-400 text-xs">No generado</span>`;
+      const cellBullets = $(`cell-bullets-${index}`);
+      const cellDescription = $(`cell-description-${index}`);
+      if (cellBullets) cellBullets.innerHTML = `<span class="text-gray-400 text-xs">No generado</span>`;
+      if (cellDescription) cellDescription.innerHTML = `<span class="text-gray-400 text-xs">No generada</span>`;
+    }
+
+    function updateListingFields(index) {
+      if (!results[index]) return;
+      results[index].bullet_points = Array.from(document.querySelectorAll(`[id^="bullet-${index}-"]`)).map(el => el.innerText.trim());
+      const description = $(`description-${index}`);
+      results[index].description = description ? description.innerText.trim() : '';
     }
 
     function copyField(index, field) {
@@ -557,7 +583,7 @@
     function copyBoth(index) {
       const item = results[index];
       if (!item) return;
-      const text = `Título:\n${item.title}\n\nHighlights:\n${item.highlights}`;
+      const text = `Título:\n${item.title}\n\nHighlights:\n${item.highlights}\n\nBullet points:\n${(item.bullet_points || []).map((b, i) => `${i + 1}. ${b}`).join('\n')}\n\nDescripción:\n${item.description || ''}`;
       navigator.clipboard.writeText(text).then(() => {
         showToast(`Título y Highlights copiados`);
       });
@@ -622,9 +648,11 @@
             name: items[i].name,
             dims: items[i].dims,
             title: out.title,
-            highlights: out.highlights
+            highlights: out.highlights,
+            bullet_points: out.bullet_points || [],
+            description: out.description || ''
           });
-          setRowSuccess(i, out.title, out.highlights);
+          setRowSuccess(i, out.title, out.highlights, out.bullet_points, out.description);
         } catch (e) {
           results.push({
             url: items[i].url,
@@ -650,7 +678,7 @@
     function exportExcel() {
       if (!results.length) return;
       const data = [
-        ["Referencia", "Título Amazon (≤ 75 car.)", "Item Highlights (≤ 125 car.)", "Longitud Título", "Longitud Highlights", "URL Imagen", "Contexto / Medidas"]
+        ["Referencia", "Título Amazon (≤ 75 car.)", "Item Highlights (≤ 125 car.)", "Bullet 1", "Bullet 2", "Bullet 3", "Bullet 4", "Bullet 5", "Descripción", "URL Imagen", "Contexto / Medidas"]
       ];
 
       results.forEach(r => {
@@ -658,8 +686,8 @@
           r.ref || getRef(r.url),
           r.title || '',
           r.highlights || '',
-          (r.title || '').length,
-          (r.highlights || '').length,
+          ...(r.bullet_points || []).slice(0, 5),
+          r.description || '',
           r.url || '',
           [r.name, r.dims].filter(Boolean).join(' | ')
         ]);
@@ -670,8 +698,8 @@
         { wch: 16 }, // Ref
         { wch: 45 }, // Titulo
         { wch: 55 }, // Highlights
-        { wch: 15 }, // Car Titulo
-        { wch: 18 }, // Car Highlights
+        { wch: 35 }, { wch: 35 }, { wch: 35 }, { wch: 35 }, { wch: 35 },
+        { wch: 80 }, // Descripcion
         { wch: 35 }, // URL
         { wch: 25 }  // Contexto
       ];
@@ -687,9 +715,9 @@
     function exportCSVLocal() {
       if (!results.length) return;
       const rows = results.map(r => 
-        `"${(r.ref || getRef(r.url)).replace(/"/g, '""')}","${(r.title || '').replace(/"/g, '""')}","${(r.highlights || '').replace(/"/g, '""')}"`
+        `"${(r.ref || getRef(r.url)).replace(/"/g, '""')}","${(r.title || '').replace(/"/g, '""')}","${(r.highlights || '').replace(/"/g, '""')}",${(r.bullet_points || []).slice(0, 5).map(b => `"${String(b).replace(/"/g, '""')}"`).join(',')},"${(r.description || '').replace(/"/g, '""')}"`
       );
-      const csvContent = '\uFEFFreferencia,titulo,highlights\n' + rows.join('\n');
+      const csvContent = '\uFEFFreferencia,titulo,highlights,bullet1,bullet2,bullet3,bullet4,bullet5,descripcion\n' + rows.join('\n');
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -706,9 +734,9 @@
     async function saveServerDownloads() {
       if (!results.length) return;
       const rows = results.map(r => 
-        `"${(r.ref || getRef(r.url)).replace(/"/g, '""')}","${(r.title || '').replace(/"/g, '""')}","${(r.highlights || '').replace(/"/g, '""')}"`
+        `"${(r.ref || getRef(r.url)).replace(/"/g, '""')}","${(r.title || '').replace(/"/g, '""')}","${(r.highlights || '').replace(/"/g, '""')}",${(r.bullet_points || []).slice(0, 5).map(b => `"${String(b).replace(/"/g, '""')}"`).join(',')},"${(r.description || '').replace(/"/g, '""')}"`
       );
-      const csvContent = 'referencia,titulo,highlights\n' + rows.join('\n');
+      const csvContent = 'referencia,titulo,highlights,bullet1,bullet2,bullet3,bullet4,bullet5,descripcion\n' + rows.join('\n');
       const filename = `amazon_listings_2026_${new Date().toISOString().slice(0,10)}.csv`;
 
       try {
@@ -731,9 +759,9 @@
     // Copiar tabla completa al portapapeles (formato TSV para pegar directo en Excel)
     function copyTableClipboard() {
       if (!results.length) return;
-      const lines = ["Referencia\tTítulo Amazon\tItem Highlights"];
+      const lines = ["Referencia\tTítulo Amazon\tItem Highlights\tBullet 1\tBullet 2\tBullet 3\tBullet 4\tBullet 5\tDescripción"];
       results.forEach(r => {
-        lines.push(`${r.ref || getRef(r.url)}\t${r.title || ''}\t${r.highlights || ''}`);
+        lines.push(`${r.ref || getRef(r.url)}\t${r.title || ''}\t${r.highlights || ''}\t${(r.bullet_points || []).slice(0, 5).join('\t')}\t${r.description || ''}`);
       });
       navigator.clipboard.writeText(lines.join('\n')).then(() => {
         showToast("Tabla copiada (pega directo con Ctrl+V en Excel)");
