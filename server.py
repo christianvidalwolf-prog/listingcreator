@@ -1,33 +1,102 @@
 #!/usr/bin/env python3
-"""Servidor local con proxy multi-proveedor para evitar CORS."""
+"""Servidor local con proxy multi-proveedor para evitar CORS y generar Títulos y Highlights de Amazon."""
 
 import base64
 import http.server
 import json
-import urllib.request
-import urllib.error
 import os
+import re
+import time
+import urllib.error
+import urllib.request
 
 PORT = 8787
 DIR = os.path.dirname(os.path.abspath(__file__))
 
 PROMPT_TEMPLATE = (
-    "ACTÚA COMO UN EXPERTO EN SEO DE AMAZON. GENERA UN TÍTULO DE 200 CARACTERES (MÁXIMA LONGITUD).\n\n"
-    "DATOS:\n"
-    "- Producto: {name}\n"
+    "ACTÚA COMO UN EXPERTO EN SEO DE AMAZON. GENERA EL TÍTULO Y LOS HIGHLIGHTS DE PRODUCTO "
+    "SIGUIENDO ESTRICTAMENTE LA NUEVA NORMATIVA OFICIAL DE AMAZON 2026.\n\n"
+    "DATOS DEL PRODUCTO:\n"
+    "- Producto / Contexto: {name}\n"
     "- Medidas: {dims}\n\n"
-    "ESTRUCTURA OBLIGATORIA (EXPANDE CADA BLOQUE):\n"
-    "1. [PRODUCTO]: Nombre comercial completo y descriptivo.\n"
-    "2. [MATERIAL]: Describe material (madera, metal, resina) y acabado (brillante, mate, rugoso).\n"
-    "3. [COLOR]: Define el tono exacto (beige seda, gris antracita, dorado envejecido).\n"
-    "4. [ESTILO]: Añade conceptos como 'Estilo Nórdico', 'Decoración Industrial' o 'Vintage Art'.\n"
-    "5. [UBICACIÓN]: 'Ideal para decorar el salón, oficina, dormitorio o recibidor'.\n"
-    "6. [CARACTERÍSTICA]: 'Resistente, elegante y de diseño exclusivo'.\n"
-    "7. [MEDIDAS]: 'Dimensiones: {dims}'.\n"
-    "8. [UNIDAD]: Solo si hay varios diseños en la foto: ' | 1 Unidad Surtida'.\n\n"
-    "INSTRUCCIÓN FINAL: NO SEAS ESCUETO. RELLENA CON ADJETIVOS Y PALABRAS CLAVE HASTA ROZAR LAS 200 LETRAS. "
-    "SI EL TÍTULO ES CORTO, ESTÁ MAL HECHO. RESPONDE SOLO CON EL TÍTULO EXTENSO."
+    "DIRECTRICES OBLIGATORIAS:\n"
+    "1. TÍTULO (title): MÁXIMO 75 CARACTERES (espacios incluidos).\n"
+    "   - Estructura: [Tipo de producto comercial] + [Material/Color principal] + [Variante clave o modelo].\n"
+    "   - Prohibido: relleno de keywords, frases de marketing ('calidad garantizada', 'oferta'), emojis o símbolos (™, ®).\n"
+    "2. HIGHLIGHTS (highlights): MÁXIMO 125 CARACTERES (espacios incluidos).\n"
+    "   - Formato: Frases cortas separadas exclusivamente por comas (sin punto y final largo).\n"
+    "   - Contenido: Materiales, acabados, medidas ({dims}) y uso principal.\n\n"
+    "RESPONDE ÚNICAMENTE CON UN OBJETO JSON VÁLIDO CON ESTE FORMATO EXACTO (sin texto adicional ni markdown):\n"
+    '{{"title": "...", "highlights": "..."}}'
 )
+
+
+def parse_ai_response(raw_text):
+    """Extrae y normaliza title y highlights asegurando cumplimiento de límites de Amazon 2026."""
+    title = ""
+    highlights = ""
+
+    if not raw_text or not isinstance(raw_text, str):
+        return {"title": "", "highlights": ""}
+
+    text = raw_text.strip()
+
+    # 1. Extraer bloque JSON directo o embebido
+    json_match = re.search(r'\{[\s\S]*\}', text)
+    if json_match:
+        try:
+            data = json.loads(json_match.group(0))
+            title = str(data.get("title") or data.get("titulo") or "").strip()
+            highlights = str(data.get("highlights") or data.get("puntos_destacados") or data.get("destacados") or "").strip()
+        except Exception:
+            pass
+
+    # 2. Fallback con regex si no se obtuvo JSON válido
+    if not title:
+        t_match = re.search(r'(?:title|título|titulo)\s*[:=]\s*["\']?([^"\n\r]+)', text, re.IGNORECASE)
+        if t_match:
+            title = t_match.group(1).strip().strip('"\'')
+    if not highlights:
+        h_match = re.search(r'(?:highlights|destacados|puntos destacados)\s*[:=]\s*["\']?([^"\n\r]+)', text, re.IGNORECASE)
+        if h_match:
+            highlights = h_match.group(1).strip().strip('"\'')
+
+    # 3. Fallback por líneas si aún está vacío
+    if not title and not highlights:
+        lines = [line.strip().strip('"\'') for line in text.split("\n") if line.strip() and not line.startswith(("{", "}", "```"))]
+        if len(lines) >= 1:
+            title = lines[0]
+        if len(lines) >= 2:
+            highlights = lines[1]
+
+    # Limpieza de comillas circundantes o prefijos residuales
+    title = re.sub(r'^(?:t[íi]tulo|title)\s*[:\-]\s*', '', title, flags=re.IGNORECASE).strip(' "\'')
+    highlights = re.sub(r'^(?:highlights|destacados)\s*[:\-]\s*', '', highlights, flags=re.IGNORECASE).strip(' "\'')
+
+    # Aplicar límites máximos de Amazon (75 y 125 caracteres)
+    if len(title) > 75:
+        truncated = title[:75]
+        last_space = truncated.rfind(' ')
+        if last_space > 40:
+            title = truncated[:last_space].rstrip(',.- ')
+        else:
+            title = truncated.rstrip(',.- ')
+
+    if len(highlights) > 125:
+        truncated = highlights[:125]
+        last_comma = truncated.rfind(',')
+        last_space = truncated.rfind(' ')
+        if last_comma > 80:
+            highlights = truncated[:last_comma].rstrip(',.- ')
+        elif last_space > 80:
+            highlights = truncated[:last_space].rstrip(',.- ')
+        else:
+            highlights = truncated.rstrip(',.- ')
+
+    return {
+        "title": title,
+        "highlights": highlights
+    }
 
 
 def fetch_image_b64(url):
@@ -42,7 +111,7 @@ def call_anthropic(api_key, image_url, name="", dims=""):
     prompt = PROMPT_TEMPLATE.format(name=name, dims=dims)
     body = json.dumps({
         "model": "claude-3-opus-20240229",
-        "max_tokens": 200,
+        "max_tokens": 350,
         "messages": [{
             "role": "user",
             "content": [
@@ -71,7 +140,7 @@ def call_openai(api_key, image_url, name="", dims=""):
     prompt = PROMPT_TEMPLATE.format(name=name, dims=dims)
     body = json.dumps({
         "model": "gpt-4o",
-        "max_tokens": 200,
+        "max_tokens": 350,
         "messages": [{
             "role": "user",
             "content": [
@@ -99,12 +168,10 @@ def call_openai(api_key, image_url, name="", dims=""):
                 return data["choices"][0]["message"]["content"].strip()
         except urllib.error.HTTPError as e:
             if e.code == 429 and attempt < max_retries - 1:
-                time.sleep(5) # Esperar 5 segundos antes de reintentar OpenAI
+                time.sleep(5)
                 continue
             raise e
 
-
-import time
 
 def call_gemini(api_key, image_url, name="", dims="", model="gemini-2.5-flash"):
     mime, b64 = fetch_image_b64(image_url)
@@ -135,7 +202,7 @@ def call_gemini(api_key, image_url, name="", dims="", model="gemini-2.5-flash"):
         except urllib.error.HTTPError as e:
             if e.code in [429, 503] and attempt < max_retries - 1:
                 print(f"⚠️ Cuota excedida. Esperando 62s para reintentar (intento {attempt+1})...")
-                time.sleep(62) # Esperar 62 segundos antes de reintentar
+                time.sleep(62)
                 continue
             raise e
         except Exception as e:
@@ -175,7 +242,7 @@ def call_groq(api_key, image_url, name="", dims=""):
     prompt = PROMPT_TEMPLATE.format(name=name, dims=dims)
     body = json.dumps({
         "model": "meta-llama/llama-4-scout-17b-16e-instruct",
-        "max_tokens": 200,
+        "max_tokens": 350,
         "messages": [{
             "role": "user",
             "content": [
@@ -205,7 +272,7 @@ def call_groq(api_key, image_url, name="", dims=""):
         except urllib.error.HTTPError as e:
             if e.code == 429 and attempt < max_retries - 1:
                 print(f"⚠️ Cuota de Groq excedida. Esperando 62s (intento {attempt+1})...")
-                time.sleep(62) # Esperar 62 segundos antes de reintentar Groq
+                time.sleep(62)
                 continue
             raise e
 
@@ -214,7 +281,7 @@ def call_kimi(api_key, image_url, name="", dims=""):
     prompt = PROMPT_TEMPLATE.format(name=name, dims=dims)
     body = json.dumps({
         "model": "moonshot-v1-8k-vision-preview",
-        "max_tokens": 300,
+        "max_tokens": 350,
         "messages": [{
             "role": "user",
             "content": [
@@ -240,15 +307,14 @@ def call_kimi(api_key, image_url, name="", dims=""):
 
 def call_deepseek(api_key, image_url, name="", dims=""):
     prompt = PROMPT_TEMPLATE.format(name=name, dims=dims)
-    # DeepSeek a veces requiere que la imagen sea procesada de forma distinta o bajo otro campo
     body = json.dumps({
         "model": "deepseek-v3-vision",
-        "max_tokens": 300,
+        "max_tokens": 350,
         "messages": [{
             "role": "user",
             "content": [
                 {"type": "text", "text": prompt},
-                {"type": "image", "image": image_url} # Formato DeepSeek VL
+                {"type": "image", "image": image_url}
             ]
         }]
     }).encode()
@@ -269,11 +335,10 @@ def call_deepseek(api_key, image_url, name="", dims=""):
 
 def call_huggingface(api_key, image_url, name="", dims=""):
     prompt = PROMPT_TEMPLATE.format(name=name, dims=dims)
-    # Usamos Qwen2-VL, que es el estándar actual más compatible en HF
     model_id = "Qwen/Qwen2-VL-7B-Instruct" 
     body = json.dumps({
         "inputs": f"{prompt} [IMAGE]: {image_url}",
-        "parameters": {"max_new_tokens": 200}
+        "parameters": {"max_new_tokens": 350}
     }).encode()
     req = urllib.request.Request(
         f"https://router.huggingface.co/models/{model_id}",
@@ -287,7 +352,6 @@ def call_huggingface(api_key, image_url, name="", dims=""):
     )
     with urllib.request.urlopen(req, timeout=60) as resp:
         data = json.loads(resp.read())
-        # HF responde a veces con el texto crudo o con una lista de diccionarios
         if isinstance(data, list):
             res = data[0].get("generated_text", "")
         else:
@@ -329,13 +393,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 name = payload.get("name", "")
                 dims = payload.get("dimensions", "")
                 
-                # Preparamos los argumentos según el proveedor
                 args = {"api_key": api_key, "image_url": image_url, "name": name, "dims": dims}
                 if provider == "gemini" and model:
                     args["model"] = model
                 
-                title = fn(**args)
-                self._respond(200, {"title": title})
+                raw_response = fn(**args)
+                parsed = parse_ai_response(raw_response)
+                self._respond(200, parsed)
             except urllib.error.HTTPError as e:
                 err_body = e.read().decode(errors="replace")
                 try:
@@ -369,9 +433,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
 
     def _respond(self, code, data):
-        body = json.dumps(data).encode()
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
