@@ -31,6 +31,38 @@
       border-color: #6366f1 !important;
       box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
     }
+    .results-table { min-width: 1480px; table-layout: fixed; }
+    .results-table th, .results-table td { vertical-align: top; }
+    .results-table th:nth-child(1), .results-table td:nth-child(1) { width: 76px; }
+    .results-table th:nth-child(2), .results-table td:nth-child(2) { width: 112px; }
+    .results-table th:nth-child(3), .results-table td:nth-child(3) { width: 180px; }
+    .results-table th:nth-child(4), .results-table td:nth-child(4) { width: 260px; }
+    .results-table th:nth-child(5), .results-table td:nth-child(5) { width: 220px; }
+    .results-table th:nth-child(6), .results-table td:nth-child(6) { width: 360px; }
+    .results-table th:nth-child(7), .results-table td:nth-child(7) { width: 360px; }
+    .results-table th:nth-child(8), .results-table td:nth-child(8) { width: 92px; }
+    .results-table tbody tr { background: #fff; }
+    .results-table tbody tr:hover { background: #f8fafc; }
+    .results-table ol { margin: 0; }
+    .results-table li { padding-left: 3px; margin-bottom: 5px; line-height: 1.45; }
+    .results-table td:nth-child(4) .editable-cell,
+    .results-table td:nth-child(5) .editable-cell,
+    .results-table td:nth-child(7) .editable-cell { background: #f8fafc; border-color: #e2e8f0; }
+    .results-table td:nth-child(6) { background: #f0fdf4; }
+    .field-label { display: none; }
+    @media (max-width: 900px) {
+      .results-table { min-width: 0; width: 100%; }
+      .results-table thead { display: none; }
+      .results-table, .results-table tbody, .results-table tr, .results-table td { display: block; }
+      .results-table tbody tr { border-bottom: 1px solid #e5e7eb; padding: 14px 0; }
+      .results-table td { width: 100% !important; border: 0; padding: 8px 16px; }
+      .results-table td::before { content: attr(data-label); display: block; color: #64748b; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 4px; }
+      .results-table td:first-child { display: flex; gap: 12px; align-items: center; }
+      .results-table td:first-child::before { display: none; }
+      .results-table td:last-child { text-align: left; }
+      .results-table td:last-child::before { display: none; }
+      .field-label { display: inline-block; }
+    }
   </style>
 </head>
 <body class="bg-gray-50 min-h-screen text-gray-800">
@@ -221,7 +253,7 @@
         </div>
       </div>
       <div class="overflow-x-auto">
-        <table class="w-full text-sm">
+        <table class="results-table w-full text-sm">
           <thead>
             <tr class="bg-gray-50 border-b border-gray-200 text-xs font-semibold uppercase tracking-wide text-gray-500">
               <th class="px-3 py-3 text-left w-14">Img</th>
@@ -429,26 +461,26 @@
               onerror="this.src='${ph}'">
           </a>
         </td>
-        <td class="px-3 py-3 align-top text-xs font-mono font-semibold text-gray-600">
+        <td data-label="Referencia" class="px-3 py-3 align-top text-xs font-mono font-semibold text-gray-600">
           ${escHtml(getRef(item.url))}
         </td>
-        <td class="px-3 py-3 align-top text-xs text-gray-500">
+        <td data-label="Contexto del producto" class="px-3 py-3 align-top text-xs text-gray-500">
           <div class="font-semibold text-gray-800 line-clamp-2">${escHtml(item.name || '-')}</div>
           <div class="text-gray-400 mt-0.5">${escHtml(item.dims || '-')}</div>
         </td>
-        <td class="px-3 py-3 align-top" id="cell-title-${index}">
+        <td data-label="Título Amazon · máximo 75 caracteres" class="px-3 py-3 align-top" id="cell-title-${index}">
           <span class="text-gray-400 text-xs"><span class="spinner"></span>Generando título…</span>
         </td>
-        <td class="px-3 py-3 align-top" id="cell-highlights-${index}">
+        <td data-label="Item Highlights · máximo 125 caracteres" class="px-3 py-3 align-top" id="cell-highlights-${index}">
           <span class="text-gray-400 text-xs"><span class="spinner"></span>Generando highlights…</span>
         </td>
-        <td class="px-3 py-3 align-top" id="cell-bullets-${index}">
+        <td data-label="5 Bullet Points · característica + beneficio" class="px-3 py-3 align-top" id="cell-bullets-${index}">
           <span class="text-gray-400 text-xs"><span class="spinner"></span>Generando bullets…</span>
         </td>
-        <td class="px-3 py-3 align-top" id="cell-description-${index}">
+        <td data-label="Descripción del producto" class="px-3 py-3 align-top" id="cell-description-${index}">
           <span class="text-gray-400 text-xs"><span class="spinner"></span>Generando descripción…</span>
         </td>
-        <td class="px-3 py-3 align-top text-center" id="cell-actions-${index}">
+        <td data-label="Acciones" class="px-3 py-3 align-top text-center" id="cell-actions-${index}">
           <span class="text-gray-300 text-xs">-</span>
         </td>`;
       tbody.appendChild(tr);
@@ -510,6 +542,7 @@
 
       cellTitle.innerHTML = `
         <div class="flex flex-col gap-1">
+          <span class="text-[10px] font-bold uppercase tracking-wide text-indigo-600">Título comercial</span>
           <div id="title-text-${index}" contenteditable="true" spellcheck="false"
             oninput="updateCounters(${index})"
             class="editable-cell text-gray-900 font-medium text-xs leading-snug p-2 rounded border border-transparent hover:border-gray-200">
@@ -527,6 +560,7 @@
 
       cellHigh.innerHTML = `
         <div class="flex flex-col gap-1">
+          <span class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Resumen visible</span>
           <div id="highlights-text-${index}" contenteditable="true" spellcheck="false"
             oninput="updateCounters(${index})"
             class="editable-cell text-gray-800 text-xs leading-snug p-2 rounded border border-transparent hover:border-gray-200">
