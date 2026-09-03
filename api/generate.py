@@ -1,6 +1,7 @@
 from http.server import BaseHTTPRequestHandler
 import base64
 import json
+import os
 import re
 import time
 import urllib.error
@@ -176,25 +177,33 @@ def call_gemini(api_key, image_url, name="", dims="", model="gemini-2.5-flash"):
                 {"text": prompt}
             ]
         }],
-        "generationConfig": {"maxOutputTokens": 500}
+        "generationConfig": {
+            "maxOutputTokens": 2048,
+            "thinkingConfig": {
+                "thinkingBudget": 0
+            }
+        }
     }).encode()
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            req = urllib.request.Request(url, data=body,
-                                          headers={
-                                              "Content-Type": "application/json",
-                                              "User-Agent": "Mozilla/5.0"
-                                          },
-                                          method="POST")
+            req = urllib.request.Request(
+                url,
+                data=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "User-Agent": "Mozilla/5.0"
+                },
+                method="POST"
+            )
             with urllib.request.urlopen(req, timeout=60) as resp:
                 data = json.loads(resp.read())
                 return data["candidates"][0]["content"]["parts"][0]["text"].strip()
         except urllib.error.HTTPError as e:
             if e.code in [429, 503] and attempt < max_retries - 1:
-                time.sleep(62)
+                time.sleep(8)
                 continue
             raise e
         except Exception as e:
@@ -263,7 +272,7 @@ def call_groq(api_key, image_url, name="", dims=""):
                 return data["choices"][0]["message"]["content"].strip()
         except urllib.error.HTTPError as e:
             if e.code == 429 and attempt < max_retries - 1:
-                time.sleep(62)
+                time.sleep(10)
                 continue
             raise e
 
@@ -362,13 +371,40 @@ PROVIDERS = {
 }
 
 
+def get_api_key(provider, client_key):
+    if client_key and str(client_key).strip():
+        return str(client_key).strip()
+    env_map = {
+        "gemini": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+        "openai": ["OPENAI_API_KEY"],
+        "anthropic": ["ANTHROPIC_API_KEY", "CLAUDE_API_KEY"],
+        "groq": ["GROQ_API_KEY"],
+        "qwen": ["QWEN_API_KEY", "DASHSCOPE_API_KEY"],
+        "kimi": ["KIMI_API_KEY", "MOONSHOT_API_KEY"],
+        "deepseek": ["DEEPSEEK_API_KEY"],
+        "huggingface": ["HUGGINGFACE_API_KEY", "HF_TOKEN"],
+    }
+    for env_var in env_map.get(provider, []):
+        val = os.environ.get(env_var, "").strip()
+        if val:
+            return val
+    return ""
+
+
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         payload = json.loads(self.rfile.read(length))
-        provider = payload.get("provider", "anthropic")
-        api_key = payload.get("api_key", "")
+        provider = payload.get("provider", "gemini")
+        client_key = payload.get("api_key", "")
         image_url = payload.get("image_url", "")
+
+        api_key = get_api_key(provider, client_key)
+        if not api_key:
+            self._respond(400, {
+                "error": f"Falta la clave de API para {provider}. Introduce tu clave en la interfaz o configúrala en el servidor."
+            })
+            return
 
         fn = PROVIDERS.get(provider)
         if not fn:

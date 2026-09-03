@@ -259,9 +259,9 @@
         storageKey: 'apikey_openai',
       },
       gemini: {
-        label: 'Google AI Studio (aistudio.google.com/app/apikey)',
-        placeholder: 'AIza…',
-        hint: 'Capa gratuita disponible — obtén tu key gratis en aistudio.google.com',
+        label: 'Google AI Studio (Gemini 2.5 Flash)',
+        placeholder: 'Preconfigurada en el servidor (o introduce tu propia AIza…)',
+        hint: '✓ Clave preconfigurada y activa en el servidor. Deja este campo vacío o introduce tu propia clave.',
         storageKey: 'apikey_gemini',
       },
       qwen: {
@@ -572,7 +572,6 @@
 
     async function processImages() {
       const apiKey = $('apiKey').value.trim();
-      if (!apiKey) { alert('Introduce tu API Key antes de continuar.'); return; }
 
       let items = [];
       if (window.pendingData && window.pendingData.length > 0) {
