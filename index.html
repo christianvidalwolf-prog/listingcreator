@@ -50,6 +50,11 @@
     .results-table td:nth-child(7) .editable-cell { background: #f8fafc; border-color: #e2e8f0; }
     .results-table td:nth-child(6) { background: #f0fdf4; }
     .field-label { display: none; }
+    .supplier-tab { color: #64748b; background: #f8fafc; }
+    .supplier-tab:hover { color: #4338ca; background: #eef2ff; }
+    .supplier-tab.active { color: #fff; background: #4f46e5; box-shadow: 0 1px 3px rgba(79,70,229,.25); }
+    .supplier-count { display: inline-flex; min-width: 20px; justify-content: center; margin-left: 4px; padding: 1px 6px; border-radius: 999px; background: rgba(255,255,255,.22); font-size: 10px; }
+    .supplier-tab:not(.active) .supplier-count { background: #e2e8f0; color: #64748b; }
     @media (max-width: 900px) {
       .results-table { min-width: 0; width: 100%; }
       .results-table thead { display: none; }
@@ -98,6 +103,17 @@
           <span class="font-bold text-indigo-600 text-sm">200 car.</span>
         </div>
       </div>
+    </div>
+
+    <!-- Pestañas de proveedores -->
+    <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-2 mb-5">
+      <div class="flex flex-wrap gap-2" role="tablist" aria-label="Proveedores">
+        <button id="supplier-tab-signes" onclick="switchSupplier('signes')" role="tab" aria-selected="true" class="supplier-tab active px-4 py-2 rounded-lg text-sm font-semibold transition-colors">Signes <span class="supplier-count" id="supplier-count-signes">0</span></button>
+        <button id="supplier-tab-dcasa" onclick="switchSupplier('dcasa')" role="tab" aria-selected="false" class="supplier-tab px-4 py-2 rounded-lg text-sm font-semibold transition-colors">DCasa <span class="supplier-count" id="supplier-count-dcasa">0</span></button>
+        <button id="supplier-tab-minerales" onclick="switchSupplier('minerales')" role="tab" aria-selected="false" class="supplier-tab px-4 py-2 rounded-lg text-sm font-semibold transition-colors">Minerales <span class="supplier-count" id="supplier-count-minerales">0</span></button>
+        <button id="supplier-tab-trediser" onclick="switchSupplier('trediser')" role="tab" aria-selected="false" class="supplier-tab px-4 py-2 rounded-lg text-sm font-semibold transition-colors">Trediser <span class="supplier-count" id="supplier-count-trediser">0</span></button>
+      </div>
+      <p id="supplierDescription" class="px-2 pt-2 text-xs text-gray-500">Catálogo activo: Signes · formato de Excel actual</p>
     </div>
 
     <!-- Panel configuración de IA -->
@@ -282,6 +298,41 @@
   <script>
     let results = [];
     let currentProvider = 'anthropic';
+    let activeSupplier = 'signes';
+    const supplierState = {
+      signes: { results: [], pendingData: null, description: 'Catálogo activo: Signes · formato de Excel actual' },
+      dcasa: { results: [], pendingData: null, description: 'Catálogo activo: DCasa · formato de Excel pendiente de configurar' },
+      minerales: { results: [], pendingData: null, description: 'Catálogo activo: Minerales · formato de Excel pendiente de configurar' },
+      trediser: { results: [], pendingData: null, description: 'Catálogo activo: Trediser · formato de Excel pendiente de configurar' }
+    };
+
+    function switchSupplier(supplier) {
+      if (supplier === activeSupplier) return;
+      supplierState[activeSupplier].results = results;
+      supplierState[activeSupplier].pendingData = window.pendingData || null;
+      activeSupplier = supplier;
+      results = supplierState[supplier].results || [];
+      window.pendingData = supplierState[supplier].pendingData || null;
+      document.querySelectorAll('.supplier-tab').forEach(tab => {
+        const selected = tab.id === `supplier-tab-${supplier}`;
+        tab.classList.toggle('active', selected);
+        tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+      });
+      $('supplierDescription').textContent = supplierState[supplier].description;
+      $('resultsBody').innerHTML = '';
+      $('resultsContainer').classList.toggle('hidden', results.length === 0);
+      $('exportGroup').classList.toggle('hidden', results.length === 0);
+      results.forEach((item, index) => setRowSuccess(index, item.title, item.highlights, item.bullet_points, item.description));
+      $('resultsCount').textContent = results.length;
+      updateSupplierCounts();
+    }
+
+    function updateSupplierCounts() {
+      Object.keys(supplierState).forEach(supplier => {
+        const count = supplier === activeSupplier ? results.length : supplierState[supplier].results.length;
+        $(`supplier-count-${supplier}`).textContent = count;
+      });
+    }
 
     const PROVIDERS = {
       anthropic: {
@@ -431,6 +482,7 @@
         
         if (urls.length > 0) {
           window.pendingData = urls;
+          supplierState[activeSupplier].pendingData = urls;
           $('progressLabel').textContent = `✓ ${urls.length} filas cargadas desde el archivo. Pulsa "Procesar imágenes".`;
         } else {
           alert('No se encontraron URLs válidas en la primera columna del archivo.');
@@ -706,6 +758,9 @@
       btn.classList.remove('opacity-60', 'cursor-not-allowed');
       $('exportGroup').classList.remove('hidden');
       window.pendingData = null;
+      supplierState[activeSupplier].results = results;
+      supplierState[activeSupplier].pendingData = null;
+      updateSupplierCounts();
     }
 
     // Exportación a Excel (.xlsx)
