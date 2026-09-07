@@ -1,0 +1,11 @@
+.git
+.env
+.env.*
+*.local
+__pycache__
+tests
+server.py
+README.md
+AUDIT.md
+.codebase-memory
+scripts

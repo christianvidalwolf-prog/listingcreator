@@ -17,3 +17,6 @@ Thumbs.db
 .env.local
 *.local
 .vercel
+.pytest_cache/
+output/
+~$*

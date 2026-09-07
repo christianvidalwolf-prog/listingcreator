@@ -1,8 +1,22 @@
 {
   "version": 2,
   "rewrites": [
-    { "source": "/", "destination": "/index.html" },
-    { "source": "/api/generate", "destination": "/api/generate.py" },
-    { "source": "/api/save", "destination": "/api/save.py" }
-  ]
+    {
+      "source": "/",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/api/generate",
+      "destination": "/api/generate.py"
+    },
+    {
+      "source": "/api/save",
+      "destination": "/api/save.py"
+    }
+  ],
+  "functions": {
+    "api/generate.py": {
+      "includeFiles": "api/data/**"
+    }
+  }
 }
