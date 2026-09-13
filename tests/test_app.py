@@ -223,7 +223,9 @@ Línea 2 con salto",
                 if fn is generate.call_deepseek:
                     self.assertEqual(req.full_url, 'https://api.deepseek.com/chat/completions')
                     self.assertEqual(req.get_header('Authorization'), 'Bearer key')
-                    self.assertEqual(body['reasoning_effort'], 'none')
+                    self.assertEqual(body['thinking'], {'type': 'disabled'})
+                    self.assertEqual(body['response_format'], {'type': 'json_object'})
+                    self.assertNotIn('reasoning_effort', body)
                     self.assertNotIn('reasoning', body)
 
     def test_image_redirect_private(self):
@@ -241,6 +243,84 @@ Línea 2 con salto",
             with self.subTest(mime=mime,size=len(data)),patch.object(generate,'validate_image_url',return_value=(generate.urllib.parse.urlsplit('http://example.com/a'),'8.8.8.8')),patch.object(generate.http.client,'HTTPConnection',return_value=conn),patch.object(generate.socket,'create_connection'):
                 with self.assertRaises(ValueError):generate.fetch_image_b64('http://example.com/a')
                 conn.close.assert_called()
+
+class DeepSeekTests(unittest.TestCase):
+    def setUp(self):
+        self.args = dict(api_key='test-key', image_url='https://example.com/product.jpg',
+                         name='Adorno', dims='30x20 cm', divisor=2)
+        self.listing = dict(title='Adorno x2 30x20 cm', highlights='Forma de pez',
+                            bullet_points=['Detalle']*5, description='Adorno',
+                            visual_analysis={'status':'identified', 'object':'Adorno',
+                                             'visible_features':['Forma de pez']})
+        self.valid = json.dumps(self.listing)
+
+    def response(self, content=None, finish='stop', **extra):
+        response = MagicMock()
+        payload = {'choices': [{'finish_reason': finish,
+                               'message': dict(content=content, **extra)}]}
+        response.__enter__.return_value.read.return_value = json.dumps(payload).encode()
+        return response
+
+    def test_final_content_wins_over_reasoning(self):
+        response = self.response(self.valid, reasoning_content='Análisis que no es JSON')
+        with patch.object(generate.urllib.request, 'urlopen', return_value=response) as opener:
+            result = generate.generate_listing(generate.call_deepseek, self.args)
+        self.assertEqual(result['title'], self.listing['title'])
+        opener.assert_called_once()
+
+    def test_empty_reasoning_only_truncated_and_malformed_answers_retry(self):
+        failures = [self.response(''), self.response(None, reasoning_content=self.valid),
+                    self.response(None, reasoning=self.valid),
+                    self.response(self.valid, finish='length'),
+                    self.response(self.valid[:-20]), self.response('Texto en lugar de JSON')]
+        for failure in failures:
+            with self.subTest(response=failure), patch.object(generate.urllib.request, 'urlopen',
+                    side_effect=[failure, self.response(self.valid)]) as opener:
+                result = generate.generate_listing(generate.call_deepseek, self.args)
+                self.assertEqual(result['title'], self.listing['title'])
+                self.assertEqual(opener.call_count, 2)
+                for call in opener.call_args_list:
+                    body = json.loads(call.args[0].data)
+                    self.assertEqual(body['response_format'], {'type':'json_object'})
+                    self.assertEqual(body['thinking'], {'type':'disabled'})
+                    parts = body['messages'][0]['content']
+                    self.assertEqual(parts[1]['image_url']['url'], self.args['image_url'])
+                    self.assertIn('PACK DE 2 UNIDADES', parts[0]['text'])
+
+    def test_repeated_empty_or_truncated_answer_has_specific_error(self):
+        for response, error in [(self.response(None, reasoning_content=self.valid), 'respuesta final'),
+                                (self.response(self.valid, finish='length'), 'límite de tokens')]:
+            with self.subTest(error=error), patch.object(generate.urllib.request, 'urlopen',
+                    return_value=response) as opener:
+                with self.assertRaisesRegex(generate.ListingFormatError, error):
+                    generate.generate_listing(generate.call_deepseek, self.args)
+                self.assertEqual(opener.call_count, 2)
+
+    def test_refusal_or_filter_is_not_retried_or_accepted(self):
+        for response in [self.response(self.valid, refusal='Rejected'),
+                         self.response(self.valid, finish='content_filter')]:
+            with patch.object(generate.urllib.request, 'urlopen', return_value=response) as opener:
+                with self.assertRaisesRegex(ValueError, 'rechazó'):
+                    generate.generate_listing(generate.call_deepseek, self.args)
+                opener.assert_called_once()
+
+    def test_text_parts_ignore_reasoning_parts(self):
+        response = self.response([{'type':'reasoning', 'text':'Análisis'},
+                                  {'type':'text', 'text':self.valid}, {'type':'text', 'text':None}])
+        with patch.object(generate.urllib.request, 'urlopen', return_value=response):
+            self.assertEqual(generate.call_deepseek(**self.args), self.valid)
+
+    def test_node_classification_keeps_its_json_format(self):
+        node = {'node_id':'123', 'confidence':'alta', 'reason':'Categoría compatible'}
+        prompt = 'Devuelve JSON con node_id, confidence y reason.'
+        with patch.object(generate.urllib.request, 'urlopen',
+                          return_value=self.response(json.dumps(node))) as opener:
+            result = generate.call_deepseek(**self.args, prompt_override=prompt)
+            self.assertEqual(json.loads(result), node)
+            body = json.loads(opener.call_args.args[0].data)
+            self.assertEqual(body['response_format'], {'type':'json_object'})
+            self.assertEqual(body['messages'][0]['content'][0]['text'], prompt)
+
 
 class HTTPTests(unittest.TestCase):
     @classmethod

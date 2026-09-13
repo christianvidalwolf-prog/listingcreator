@@ -98,4 +98,6 @@ Detalles de la auditoría: [AUDIT.md](AUDIT.md).
 
 En ambas pantallas, selecciona **DeepSeek-V4.1-Flash** y pega tu clave de DeepSeek en el campo API key. La integración envía texto e imagen a `https://api.deepseek.com/chat/completions` con el modelo `deepseek-flash`, identificador oficial de V4.1-Flash. También se utiliza al asignar nodos con este proveedor. En el servidor puedes usar `DEEPSEEK_API_KEY`; si has configurado `DEEPSEEK_MODEL`, elimina esa sobrescritura o establece `deepseek-flash` para utilizar este modelo. La clave introducida se conserva únicamente durante la sesión de la pestaña.
 
+La integración activa el [modo JSON de DeepSeek](https://api-docs.deepseek.com/guides/json_mode/) mediante `response_format: {"type": "json_object"}` tanto para fichas como para nodos, y desactiva el razonamiento con `thinking: {"type": "disabled"}`. Solo se procesa la respuesta final (`content`), nunca `reasoning_content`. Una respuesta final vacía o cortada (`finish_reason: length`) activa el único reintento de generación; los rechazos del proveedor no se reintentan. El modo JSON asegura el formato sintáctico, pero siguen validándose los campos y la identificación visual.
+
 Referencia: https://www.deepseek.com/en/news/deepseek-v4-1-flash/

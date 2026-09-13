@@ -734,7 +734,8 @@ def call_deepseek(api_key, image_url, name="", dims="", divisor=1, model="", pro
     body = json.dumps({
         "model": selected_model,
         "max_tokens": 4096,
-        "reasoning_effort": "none",
+        "thinking": {"type": "disabled"},
+        "response_format": {"type": "json_object"},
         "messages": [{
             "role": "user",
             "content": [
@@ -755,21 +756,30 @@ def call_deepseek(api_key, image_url, name="", dims="", divisor=1, model="", pro
     )
     with urllib.request.urlopen(req, timeout=60) as resp:
         data = json.loads(resp.read())
-        message = data.get("choices", [{}])[0].get("message", {})
+        choices = data.get("choices")
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            raise ValueError("DeepSeek devolvió una respuesta de API sin resultados")
+        choice = choices[0]
+        message = choice.get("message") or {}
+        if not isinstance(message, dict):
+            raise ValueError("DeepSeek devolvió un mensaje de API inválido")
+        finish_reason = choice.get("finish_reason")
+        if message.get("refusal") or finish_reason == "content_filter":
+            raise ValueError("DeepSeek rechazó generar esta ficha. Revisa la imagen y los datos del producto.")
+        if finish_reason == "length":
+            raise ListingFormatError("DeepSeek cortó la respuesta al alcanzar el límite de tokens; vuelve a intentar la fila")
+        if finish_reason not in (None, "stop"):
+            raise ValueError("DeepSeek interrumpió la generación. Vuelve a intentar la fila.")
+        # reasoning_content is internal reasoning, never the final listing.
         content = message.get("content")
-        if not content and message.get("reasoning_content"):
-            content = message.get("reasoning_content")
-        elif not content and message.get("reasoning"):
-            content = message.get("reasoning")
         if isinstance(content, list):
             content = "".join(
-                part.get("text", "") for part in content if isinstance(part, dict)
+                part["text"] for part in content
+                if isinstance(part, dict) and part.get("type", "text") == "text"
+                and isinstance(part.get("text"), str)
             )
         if not isinstance(content, str) or not content.strip():
-            reason = (message.get("refusal")
-                      or data.get("error", {}).get("message")
-                      or f"finalización: {data.get('choices', [{}])[0].get('finish_reason', 'desconocida')}")
-            raise ValueError(reason or "DeepSeek no devolvió contenido de texto")
+            raise ListingFormatError("DeepSeek no devolvió una respuesta final; vuelve a intentar la fila")
         return content.strip()
 
 
