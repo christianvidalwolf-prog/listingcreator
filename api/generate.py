@@ -174,7 +174,7 @@ def build_prompt(name="", dims="", divisor=1):
         "No uses peso del paquete, peso bruto, capacidad ni carga máxima como peso del artículo. "
         "Si no hay peso neto confirmado, usa null y no inventes peso en títulos, viñetas ni descripción.\n"
         "RESPONDE ÚNICAMENTE CON UN OBJETO JSON VÁLIDO CON ESTE FORMATO EXACTO (sin texto adicional ni markdown):\n"
-        '{{"visual_analysis": {{"status": "identified", "object": "...", "visible_features": ["..."]}}, "title": "...", "highlights": "...", "peso_g": null, "material": "...", "color": "...", "medidas": "...", "bullet_points": ["...", "...", "...", "...", "..."], "description": "...", "product_type": "...", "node_search_terms": ["...", "..."], "backend_keywords": "..."}}'
+        '{"visual_analysis": {"status": "identified", "object": "...", "visible_features": ["..."]}, "title": "...", "highlights": "...", "peso_g": null, "material": "...", "color": "...", "medidas": "...", "bullet_points": ["...", "...", "...", "...", "..."], "description": "...", "product_type": "...", "node_search_terms": ["...", "..."], "backend_keywords": "..."}'
     )
 
 
@@ -216,6 +216,91 @@ def ensure_pack_in_title(title, divisor):
     return truncated.rstrip(',.- ')
 
 
+def clean_raw_llm_output(raw_text):
+    if not raw_text or not isinstance(raw_text, str):
+        return ""
+    text = raw_text.strip()
+    # 1. Remove <think>...</think> or <thought>...</thought> blocks (common in reasoning models)
+    text = re.sub(r"<(?:think|thought)>.*?</(?:think|thought)>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    # 2. Remove unclosed <think> or <thought> if model output was truncated
+    text = re.sub(r"<(?:think|thought)>.*$", "", text, flags=re.DOTALL | re.IGNORECASE)
+    # 3. Strip markdown code fences if wrapped in ```json ... ``` or ``` ... ```
+    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*```$", "", text)
+    return text.strip()
+
+
+def extract_json_object(raw_text):
+    text = clean_raw_llm_output(raw_text)
+    if not text:
+        return None
+
+    def is_valid_target_dict(obj):
+        return isinstance(obj, dict) and any(k in obj for k in ("title", "titulo", "visual_analysis", "bullet_points", "highlights"))
+
+    # Strategy 1: Direct json.loads with strict=False
+    try:
+        data = json.loads(text, strict=False)
+        if is_valid_target_dict(data):
+            return data
+    except Exception:
+        pass
+
+    # Strategy 2: Use json.JSONDecoder(strict=False).raw_decode on all '{' occurrences
+    decoder = json.JSONDecoder(strict=False)
+    for match in re.finditer(r"\{", text):
+        try:
+            candidate, _ = decoder.raw_decode(text[match.start():])
+            if is_valid_target_dict(candidate):
+                return candidate
+        except Exception:
+            continue
+
+    # Strategy 3: Find outermost '{' and '}' substring and try parsing after cleaning trailing commas
+    first_brace = text.find("{")
+    last_brace = text.rfind("}")
+    if first_brace != -1 and last_brace > first_brace:
+        json_str = text[first_brace : last_brace + 1]
+        cleaned_json = re.sub(r",\s*([}\]])", r"\1", json_str)
+        try:
+            data = json.loads(cleaned_json, strict=False)
+            if is_valid_target_dict(data):
+                return data
+        except Exception:
+            pass
+
+        try:
+            def replace_newlines(m):
+                return m.group(0).replace("\n", "\\n").replace("\r", "\\r")
+            fixed_quotes = re.sub(r'"([^"\\]|\\.)*"', replace_newlines, cleaned_json, flags=re.DOTALL)
+            data = json.loads(fixed_quotes, strict=False)
+            if is_valid_target_dict(data):
+                return data
+        except Exception:
+            pass
+
+    return None
+
+
+class ListingFormatError(ValueError):
+    """A malformed or incomplete answer can be regenerated once."""
+
+
+def generate_listing(fn, args):
+    """Retry format failures once with the original image and product context."""
+    try:
+        return parse_ai_response(fn(**args), require_visual=True, divisor=args["divisor"])
+    except ListingFormatError:
+        prompt = build_prompt(name=args["name"], dims=args["dims"], divisor=args["divisor"])
+        prompt += ("\nLa respuesta anterior no tenía el formato completo requerido. "
+                   "Genera de nuevo la ficha completa a partir de la imagen y los datos. "
+                   "Devuelve un único objeto JSON, con comillas dobles y todas las llaves cerradas, "
+                   "sin markdown ni razonamiento. Incluye los cinco bullets y la descripción "
+                   "si el producto está identificado; si no, declara el estado visual correspondiente.")
+        return parse_ai_response(fn(**args, prompt_override=prompt),
+                                 require_visual=True, divisor=args["divisor"])
+
+
 def parse_ai_response(raw_text, require_visual=False, divisor=1):
     """Normaliza la ficha y, en generación, exige identificación visual declarada."""
     title = ""
@@ -226,22 +311,11 @@ def parse_ai_response(raw_text, require_visual=False, divisor=1):
     description = ""
 
     if not raw_text or not isinstance(raw_text, str):
-        raise ValueError("La IA devolvió una respuesta vacía")
+        raise ListingFormatError("La IA devolvió una respuesta vacía")
 
-    text = raw_text.strip()
-
-    decoder = json.JSONDecoder()
-    data = None
-    for match in re.finditer(r"\{", text):
-        try:
-            candidate, _ = decoder.raw_decode(text[match.start():])
-            if isinstance(candidate, dict) and any(k in candidate for k in ("title", "titulo", "visual_analysis")):
-                data = candidate
-                break
-        except ValueError:
-            continue
+    data = extract_json_object(raw_text)
     if data is None:
-        raise ValueError("La IA no devolvió una ficha JSON válida; vuelve a intentar la fila")
+        raise ListingFormatError("La IA no devolvió una ficha JSON válida; vuelve a intentar la fila")
     visual = data.get("visual_analysis")
     if require_visual:
         if not isinstance(visual, dict):
@@ -275,7 +349,7 @@ def parse_ai_response(raw_text, require_visual=False, divisor=1):
         bullet_points = []
     bullet_points = [p.strip() for p in bullet_points if isinstance(p, str) and p.strip()][:5]
     if not title or not highlights or len(bullet_points) != 5 or not description:
-        raise ValueError("La ficha está incompleta: requiere título, highlights, cinco bullets y descripción")
+        raise ListingFormatError("La ficha está incompleta: requiere título, highlights, cinco bullets y descripción")
 
     # Limpieza de comillas circundantes o prefijos residuales
     title = re.sub(r'^(?:t[íi]tulo|title)\s*[:\-]\s*', '', title, flags=re.IGNORECASE).strip(' "\'')
@@ -453,7 +527,7 @@ def call_anthropic(api_key, image_url, name="", dims="", divisor=1, prompt_overr
     prompt = prompt_override or build_prompt(name=name, dims=dims, divisor=divisor)
     body = json.dumps({
         "model": os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
-        "max_tokens": 2048,
+        "max_tokens": 4096,
         "messages": [{
             "role": "user",
             "content": [
@@ -482,7 +556,7 @@ def call_openai(api_key, image_url, name="", dims="", divisor=1, prompt_override
     prompt = prompt_override or build_prompt(name=name, dims=dims, divisor=divisor)
     body = json.dumps({
         "model": "gpt-4o",
-        "max_tokens": 2048,
+        "max_tokens": 4096,
         "messages": [{
             "role": "user",
             "content": [
@@ -526,7 +600,7 @@ def call_gemini(api_key, image_url, name="", dims="", model="gemini-2.5-flash", 
             ]
         }],
         "generationConfig": {
-            "maxOutputTokens": 2048,
+            "maxOutputTokens": 4096,
             "thinkingConfig": {
                 "thinkingBudget": 128 if "pro" in model else 0
             }
@@ -592,7 +666,7 @@ def call_groq(api_key, image_url, name="", dims="", divisor=1, prompt_override=N
     prompt = prompt_override or build_prompt(name=name, dims=dims, divisor=divisor)
     body = json.dumps({
         "model": "meta-llama/llama-4-scout-17b-16e-instruct",
-        "max_tokens": 2048,
+        "max_tokens": 4096,
         "messages": [{
             "role": "user",
             "content": [
@@ -630,7 +704,7 @@ def call_kimi(api_key, image_url, name="", dims="", divisor=1, prompt_override=N
     prompt = prompt_override or build_prompt(name=name, dims=dims, divisor=divisor)
     body = json.dumps({
         "model": "moonshot-v1-8k-vision-preview",
-        "max_tokens": 2048,
+        "max_tokens": 4096,
         "messages": [{
             "role": "user",
             "content": [
@@ -654,11 +728,12 @@ def call_kimi(api_key, image_url, name="", dims="", divisor=1, prompt_override=N
         return data["choices"][0]["message"]["content"].strip()
 
 
-def call_deepseek(api_key, image_url, name="", dims="", divisor=1, prompt_override=None):
+def call_deepseek(api_key, image_url, name="", dims="", divisor=1, model="", prompt_override=None, **kwargs):
     prompt = prompt_override or build_prompt(name=name, dims=dims, divisor=divisor)
+    selected_model = model or os.environ.get("DEEPSEEK_MODEL", "deepseek-flash")
     body = json.dumps({
-        "model": os.environ.get("DEEPSEEK_MODEL", "deepseek-flash"),
-        "max_tokens": 2048,
+        "model": selected_model,
+        "max_tokens": 4096,
         "reasoning_effort": "none",
         "messages": [{
             "role": "user",
@@ -682,6 +757,10 @@ def call_deepseek(api_key, image_url, name="", dims="", divisor=1, prompt_overri
         data = json.loads(resp.read())
         message = data.get("choices", [{}])[0].get("message", {})
         content = message.get("content")
+        if not content and message.get("reasoning_content"):
+            content = message.get("reasoning_content")
+        elif not content and message.get("reasoning"):
+            content = message.get("reasoning")
         if isinstance(content, list):
             content = "".join(
                 part.get("text", "") for part in content if isinstance(part, dict)
@@ -694,11 +773,12 @@ def call_deepseek(api_key, image_url, name="", dims="", divisor=1, prompt_overri
         return content.strip()
 
 
-def call_openrouter(api_key, image_url, name="", dims="", divisor=1, prompt_override=None):
+def call_openrouter(api_key, image_url, name="", dims="", divisor=1, model="", prompt_override=None, **kwargs):
     prompt = prompt_override or build_prompt(name=name, dims=dims, divisor=divisor)
+    selected_model = model or os.environ.get("OPENROUTER_MODEL", "deepseek/deepseek-v4-flash-vision-exp")
     body = json.dumps({
-        "model": "deepseek/deepseek-v4-flash-vision-exp",
-        "max_tokens": 2048,
+        "model": selected_model,
+        "max_tokens": 4096,
         "reasoning": {"effort": "none"},
         "messages": [{
             "role": "user",
@@ -724,6 +804,10 @@ def call_openrouter(api_key, image_url, name="", dims="", divisor=1, prompt_over
         data = json.loads(resp.read())
         message = data.get("choices", [{}])[0].get("message", {})
         content = message.get("content")
+        if not content and message.get("reasoning_content"):
+            content = message.get("reasoning_content")
+        elif not content and message.get("reasoning"):
+            content = message.get("reasoning")
         if isinstance(content, list):
             content = "".join(
                 part.get("text", "") for part in content if isinstance(part, dict)
@@ -736,11 +820,12 @@ def call_openrouter(api_key, image_url, name="", dims="", divisor=1, prompt_over
         return content.strip()
 
 
-def call_huggingface(api_key, image_url, name="", dims="", divisor=1, prompt_override=None):
+def call_huggingface(api_key, image_url, name="", dims="", divisor=1, model="", prompt_override=None, **kwargs):
     prompt = prompt_override or build_prompt(name=name, dims=dims, divisor=divisor)
+    selected_model = model or os.environ.get("HUGGINGFACE_MODEL", "Qwen/Qwen2.5-VL-3B-Instruct")
     body = json.dumps({
-        "model": os.environ.get("HUGGINGFACE_MODEL", "Qwen/Qwen2.5-VL-3B-Instruct"),
-        "max_tokens": 2048,
+        "model": selected_model,
+        "max_tokens": 4096,
         "messages": [{"role": "user", "content": [
             {"type": "text", "text": prompt},
             {"type": "image_url", "image_url": {"url": image_url}}
@@ -866,7 +951,7 @@ class handler(BaseHTTPRequestHandler):
             args = {"api_key": api_key, "image_url": image_url,
                     "name": payload.get("name", ""), "dims": payload.get("dimensions", ""),
                     "divisor": divisor}
-            if provider == "gemini" and model:
+            if model:
                 args["model"] = model
             action = payload.get("action", "generate")
             if action == "map_node":
@@ -876,7 +961,7 @@ class handler(BaseHTTPRequestHandler):
                 return
             if action != "generate":
                 raise ValueError("Acción desconocida")
-            parsed = parse_ai_response(fn(**args), require_visual=True, divisor=divisor)
+            parsed = generate_listing(fn, args)
             dims = normalize_dimensions(args["dims"])
             if dims != "-":
                 parsed["medidas"] = dims

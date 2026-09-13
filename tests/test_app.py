@@ -9,6 +9,50 @@ from api import generate
 from server import Handler
 
 class ParsingTests(unittest.TestCase):
+    def test_prompt_example_is_valid_json(self):
+        for divisor in (1, 3):
+            prompt = generate.build_prompt('Adorno', '30x20 cm', divisor)
+            example = json.loads(prompt.rsplit('\n', 1)[1])
+            self.assertEqual(example['visual_analysis']['status'], 'identified')
+            self.assertEqual(len(example['bullet_points']), 5)
+
+    def test_generation_retries_format_failures_once(self):
+        args = dict(api_key='key', image_url='https://example.com/a',
+                    name='Adorno', dims='30x20 cm', divisor=2)
+        row = dict(title='Adorno x2 30x20 cm', highlights='Forma de pez',
+                   bullet_points=['Detalle']*5, description='Adorno',
+                   visual_analysis={'status':'identified', 'object':'Adorno',
+                                    'visible_features':['Forma de pez']})
+        valid = json.dumps(row)
+        provider = MagicMock(return_value=valid)
+        self.assertEqual(generate.generate_listing(provider, args)["title"], row["title"])
+        provider.assert_called_once_with(**args)
+        for invalid in ('', 'No es JSON', valid[:-10], json.dumps(dict(row, bullet_points=[]))):
+            with self.subTest(invalid=invalid):
+                provider = MagicMock(side_effect=[invalid, valid])
+                self.assertEqual(generate.generate_listing(provider, args)['title'], row['title'])
+                self.assertEqual(provider.call_count, 2)
+                retry = provider.call_args.kwargs
+                for key, value in args.items():
+                    self.assertEqual(retry[key], value)
+                self.assertIn('PACK DE 2 UNIDADES', retry['prompt_override'])
+        provider = MagicMock(return_value='JSON roto')
+        with self.assertRaises(generate.ListingFormatError):
+            generate.generate_listing(provider, args)
+        self.assertEqual(provider.call_count, 2)
+
+    def test_generation_does_not_retry_visual_abstention_or_timeout(self):
+        args = dict(api_key='key', image_url='https://example.com/a', name='', dims='', divisor=1)
+        for status in ('uncertain', 'unavailable', 'conflict'):
+            provider = MagicMock(return_value=json.dumps({'visual_analysis': {'status': status}}))
+            with self.subTest(status=status), self.assertRaises(ValueError):
+                generate.generate_listing(provider, args)
+            provider.assert_called_once()
+        provider = MagicMock(side_effect=TimeoutError('timeout'))
+        with self.assertRaises(TimeoutError):
+            generate.generate_listing(provider, args)
+        provider.assert_called_once()
+
     def test_dimensions(self):
         for raw, expected in [('100x200 cm','100x200 cm'),('100x200 mm','10x20 cm'),('1 m x 20 cm x 50 mm','100x20x5 cm'),('1,25 × 0,5 m','125x50 cm'),('2.55x1.25 cm','2.55x1.25 cm'),('100x200','-'),('0x2 cm','-'),('-2x3 cm','-')]:
             with self.subTest(raw=raw): self.assertEqual(generate.normalize_dimensions(raw), expected)
@@ -96,6 +140,32 @@ class ParsingTests(unittest.TestCase):
         for field, value in [('title','Adorno de pared ' * 6 + '30 cm'),('highlights','Decoración ' * 13 + 'Jacinto de agua')]:
             with self.subTest(field=field), self.assertRaisesRegex(ValueError,'reformular'):
                 generate.parse_ai_response(json.dumps(dict(row,**{field:value})),require_visual=True)
+
+    def test_deepseek_reasoning_and_json_cleaning(self):
+        raw_output = """<think>
+        Visual analysis:
+        { "temp_step": 1 }
+        </think>
+        ```json
+        {
+          "visual_analysis": {"status": "identified", "object": "Florero", "visible_features": ["cerámica blanco"]},
+          "title": "Florero de Cerámica Blanco 15 cm",
+          "highlights": "Florero decorativo",
+          "material": "Cerámica",
+          "color": "Blanco",
+          "medidas": "15 cm",
+          "bullet_points": ["Bullet 1", "Bullet 2", "Bullet 3", "Bullet 4", "Bullet 5",],
+          "description": "Línea 1
+Línea 2 con salto",
+          "product_type": "Florero",
+          "node_search_terms": ["florero"],
+          "backend_keywords": "florero blanco"
+        }
+        ```"""
+        parsed = generate.parse_ai_response(raw_output, require_visual=True)
+        self.assertEqual(parsed['title'], "Florero de Cerámica Blanco 15 cm")
+        self.assertEqual(len(parsed['bullet_points']), 5)
+        self.assertIn("Línea 1", parsed['description'])
 
     def test_every_provider_sends_image_with_visual_title_prompt(self):
         data = {'content':[{'text':'result'}], 'choices':[{'message':{'content':'result'}}],
