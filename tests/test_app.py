@@ -142,7 +142,7 @@ class ParsingTests(unittest.TestCase):
     def test_provider_payloads(self):
         response=MagicMock()
         response.__enter__.return_value.read.return_value=json.dumps({'choices':[{'message':{'content':'result'}}]}).encode()
-        for fn, expected in [(generate.call_deepseek,'deepseek-v4-flash-vision-exp'),(generate.call_huggingface,'Qwen/Qwen2.5-VL-3B-Instruct')]:
+        for fn, expected in [(generate.call_deepseek,'deepseek-flash'),(generate.call_huggingface,'Qwen/Qwen2.5-VL-3B-Instruct')]:
             with self.subTest(provider=fn.__name__),patch.object(generate.urllib.request,'urlopen',return_value=response) as opener,patch.dict(generate.os.environ,{},clear=True):
                 self.assertEqual(fn('key','https://example.com/a'),'result')
                 req=opener.call_args.args[0]
@@ -150,6 +150,11 @@ class ParsingTests(unittest.TestCase):
                 self.assertEqual(body['model'],expected)
                 self.assertEqual(body['messages'][0]['content'][1]['type'],'image_url')
                 self.assertGreaterEqual(body['max_tokens'],2048)
+                if fn is generate.call_deepseek:
+                    self.assertEqual(req.full_url, 'https://api.deepseek.com/chat/completions')
+                    self.assertEqual(req.get_header('Authorization'), 'Bearer key')
+                    self.assertEqual(body['reasoning_effort'], 'none')
+                    self.assertNotIn('reasoning', body)
 
     def test_image_redirect_private(self):
         conn=MagicMock()

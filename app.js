@@ -85,9 +85,9 @@
         storageKey: 'apikey_kimi',
       },
       deepseek: {
-        label: 'DeepSeek Platform (platform.deepseek.com)',
+        label: 'API key de DeepSeek (platform.deepseek.com)',
         placeholder: 'sk-…',
-        hint: 'Capa de créditos al registrarse.',
+        hint: 'DeepSeek-V4.1-Flash con visión. Pega tu API key de DeepSeek para usar su API directa.',
         storageKey: 'apikey_deepseek',
       },
       openrouter: {

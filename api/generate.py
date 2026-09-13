@@ -657,9 +657,9 @@ def call_kimi(api_key, image_url, name="", dims="", divisor=1, prompt_override=N
 def call_deepseek(api_key, image_url, name="", dims="", divisor=1, prompt_override=None):
     prompt = prompt_override or build_prompt(name=name, dims=dims, divisor=divisor)
     body = json.dumps({
-        "model": os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash-vision-exp"),
+        "model": os.environ.get("DEEPSEEK_MODEL", "deepseek-flash"),
         "max_tokens": 2048,
-        "reasoning": {"effort": "none"},
+        "reasoning_effort": "none",
         "messages": [{
             "role": "user",
             "content": [

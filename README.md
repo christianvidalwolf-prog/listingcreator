@@ -93,3 +93,9 @@ node --check app.js
 Pruebas de navegador con Playwright (dependencia de desarrollo, no del backend): instala Playwright y Chromium en un entorno de pruebas, sirve este directorio en `127.0.0.1:8799` y ejecuta `node tests/browser.cjs`. La prueba simula las respuestas de IA y no consume créditos.
 
 Detalles de la auditoría: [AUDIT.md](AUDIT.md).
+
+### DeepSeek-V4.1-Flash (API directa)
+
+En ambas pantallas, selecciona **DeepSeek-V4.1-Flash** y pega tu clave de DeepSeek en el campo API key. La integración envía texto e imagen a `https://api.deepseek.com/chat/completions` con el modelo `deepseek-flash`, identificador oficial de V4.1-Flash. También se utiliza al asignar nodos con este proveedor. En el servidor puedes usar `DEEPSEEK_API_KEY`; si has configurado `DEEPSEEK_MODEL`, elimina esa sobrescritura o establece `deepseek-flash` para utilizar este modelo. La clave introducida se conserva únicamente durante la sesión de la pestaña.
+
+Referencia: https://www.deepseek.com/en/news/deepseek-v4-1-flash/
