@@ -53,6 +53,14 @@ class ParsingTests(unittest.TestCase):
             generate.generate_listing(provider, args)
         provider.assert_called_once()
 
+    def test_oversized_export_is_rejected_before_reading(self):
+        request = MagicMock()
+        request.headers = {'Content-Length': str(generate.MAX_BULK_EXPORT_BYTES + 1),
+                           'Content-Type': 'application/json'}
+        with self.assertRaisesRegex(ValueError, 'Divide el lote'):
+            generate.read_payload(request, bulk_limit=generate.MAX_BULK_EXPORT_BYTES)
+        request.rfile.read.assert_not_called()
+
     def test_dimensions(self):
         for raw, expected in [('100x200 cm','100x200 cm'),('100x200 mm','10x20 cm'),('1 m x 20 cm x 50 mm','100x20x5 cm'),('1,25 × 0,5 m','125x50 cm'),('2.55x1.25 cm','2.55x1.25 cm'),('100x200','-'),('0x2 cm','-'),('-2x3 cm','-')]:
             with self.subTest(raw=raw): self.assertEqual(generate.normalize_dimensions(raw), expected)
@@ -396,6 +404,39 @@ class HTTPTests(unittest.TestCase):
         status, body=self.request('/api/generate',b'{"action":"search_nodes","query":"2844384031"}',{'Content-Type':'application/json'})
         self.assertEqual(status,200)
         self.assertEqual(json.loads(body)['nodes'][0]['id'],'2844384031')
+
+    def test_export_bulk_above_64kb_preserves_all_rows(self):
+        import base64, io, openpyxl
+        items = [dict(ref=str(i), title=f'Producto {i}', highlights='Detalles',
+                      description='Descripción con ñ y acentos. ' * 30,
+                      bullet_points=['Característica del producto. ' * 5] * 5)
+                 for i in range(50)]
+        payload = json.dumps({'action':'export_bulk', 'items':items}, ensure_ascii=False).encode()
+        self.assertGreater(len(payload), 65536)
+        status, body = self.request('/api/generate', payload, {'Content-Type':'application/json'})
+        self.assertEqual(status, 200, body[:300])
+        result = json.loads(body)
+        self.assertEqual(result['count'], len(items))
+        wb = openpyxl.load_workbook(io.BytesIO(base64.b64decode(result['content_b64'])))
+        try:
+            ws = wb['Plantilla']
+            for index, item in enumerate(items, start=7):
+                self.assertEqual(ws[f'G{index}'].value, item['title'])
+                self.assertEqual(ws[f'AN{index}'].value, item['description'])
+                self.assertEqual(ws[f'AS{index}'].value, item['bullet_points'][4])
+        finally:
+            wb.close()
+
+    def test_bulk_export_limits_and_other_actions(self):
+        cases = [({'action':'generate', 'name':'x' * 65536}, '64 KB'),
+                 ({'action':'export_bulk', 'items':[{}] * 1001}, '1000 productos'),
+                 ({'action':'export_bulk', 'items':['invalid']}, 'objeto JSON')]
+        for payload, error in cases:
+            with self.subTest(error=error):
+                status, body = self.request('/api/generate', json.dumps(payload).encode(),
+                                            {'Content-Type':'application/json'})
+                self.assertEqual(status, 400)
+                self.assertIn(error, json.loads(body)['error'])
 
     def test_export_bulk_action(self):
         import base64, io, openpyxl

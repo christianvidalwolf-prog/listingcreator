@@ -101,3 +101,5 @@ En ambas pantallas, selecciona **DeepSeek-V4.1-Flash** y pega tu clave de DeepSe
 La integración activa el [modo JSON de DeepSeek](https://api-docs.deepseek.com/guides/json_mode/) mediante `response_format: {"type": "json_object"}` tanto para fichas como para nodos, y desactiva el razonamiento con `thinking: {"type": "disabled"}`. Solo se procesa la respuesta final (`content`), nunca `reasoning_content`. Una respuesta final vacía o cortada (`finish_reason: length`) activa el único reintento de generación; los rechazos del proveedor no se reintentan. El modo JSON asegura el formato sintáctico, pero siguen validándose los campos y la identificación visual.
 
 Referencia: https://www.deepseek.com/en/news/deepseek-v4-1-flash/
+
+La exportación a la plantilla de Amazon admite hasta 1000 fichas y 10 MB de datos JSON por solicitud. Las solicitudes de generación individual mantienen el límite de 64 KB. Si la exportación supera el límite, divide el lote en varios archivos.

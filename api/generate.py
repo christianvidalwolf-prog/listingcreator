@@ -884,13 +884,20 @@ def get_api_key(provider, client_key):
     return ""
 
 
-def read_payload(request, limit=65536):
+MAX_BULK_EXPORT_BYTES = 10 * 1024 * 1024
+MAX_BULK_EXPORT_ITEMS = 1000
+
+
+def read_payload(request, limit=65536, bulk_limit=None):
     try:
         length = int(request.headers.get("Content-Length", "0"))
     except ValueError:
         raise ValueError("Content-Length inválido") from None
-    if length <= 0 or length > limit:
-        raise ValueError("Cuerpo de solicitud vacío o demasiado grande")
+    if length <= 0:
+        raise ValueError("Cuerpo de solicitud vacío")
+    read_limit = max(limit, bulk_limit or limit)
+    if length > read_limit:
+        raise ValueError(f"La solicitud supera el límite de {read_limit // 1024} KB. Divide el lote en varios archivos.")
     if request.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
         raise ValueError("Se requiere Content-Type application/json")
     try:
@@ -899,6 +906,9 @@ def read_payload(request, limit=65536):
         raise ValueError("JSON inválido") from None
     if not isinstance(payload, dict):
         raise ValueError("Se requiere un objeto JSON")
+    allowed_limit = bulk_limit if bulk_limit and payload.get("action") == "export_bulk" else limit
+    if length > allowed_limit:
+        raise ValueError(f"La solicitud supera el límite de {allowed_limit // 1024} KB para esta acción")
     return payload
 
 
@@ -906,7 +916,7 @@ class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         api_key = ""
         try:
-            payload = read_payload(self)
+            payload = read_payload(self, bulk_limit=MAX_BULK_EXPORT_BYTES)
             if payload.get("action") == "search_nodes":
                 query = payload.get("query", "")
                 if not isinstance(query, str) or not 1 <= len(query.strip()) <= 200:
@@ -922,6 +932,10 @@ class handler(BaseHTTPRequestHandler):
                 items = payload.get("items", [])
                 if not isinstance(items, list) or not items:
                     raise ValueError("No hay fichas para exportar a la plantilla de Amazon")
+                if len(items) > MAX_BULK_EXPORT_ITEMS:
+                    raise ValueError("El máximo es 1000 productos por exportación. Divide el lote en varios archivos.")
+                if any(not isinstance(item, dict) for item in items):
+                    raise ValueError("Cada ficha para exportar debe ser un objeto JSON")
                 excel_bytes = generate_bulk_import_excel(items)
                 b64 = base64.b64encode(excel_bytes).decode("ascii")
                 filename = payload.get("filename") or f"Amazon_Bulk_Import_Signes_{time.strftime('%Y%m%d_%H%M%S')}.xlsm"
